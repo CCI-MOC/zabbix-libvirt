@@ -1,4 +1,4 @@
-# zabbix-kvm
+# zabbix-libvirt
 
 This repository contains a set of scripts to monitor Virtual Machines on hosts using the libvirt API. It is still a work in progress.
 
