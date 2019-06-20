@@ -1,14 +1,12 @@
-#! /usr/bin/python
-
 """
 This file holds the class that creates a connection to libvirt and provides
 various methods to get useful information
 """
 
-import libvirt
-import sys
 import time
+import sys
 from xml.etree import ElementTree
+import libvirt
 
 
 SLEEP_TIME = 1
@@ -26,7 +24,7 @@ class LibvirtConnection(object):
     def __init__(self, uri=None):
         """Creates a read only connection to libvirt"""
         self.conn = libvirt.openReadOnly(uri)
-        if self.conn == None:
+        if self.conn is None:
             sys.stdout.write("Failed to open connection to the hypervisor")
             # FIXME: Need to figure out if exiting is the right thing to do here.
             sys.exit(1)
@@ -40,7 +38,7 @@ class LibvirtConnection(object):
     def _get_domain_by_uuid(self, domain_uuid_string):
         """Find the domain by uuid and return domain object"""
         domain = self.conn.lookupByUUIDString(domain_uuid_string)
-        if domain == None:
+        if domain is None:
             sys.stdout.write("Failed to find domain: " + domain_uuid_string)
             sys.exit(1)
         return domain
@@ -65,7 +63,8 @@ class LibvirtConnection(object):
         for domain in domains:
             tree = ElementTree.fromstring(domain.XMLDesc())
             elements = tree.findall('devices/interface/target')
-            vnics.extend([{"{#VNIC}": element.get('dev'),"{#DOMAINUUID}": domain.UUIDString()} for element in elements])
+            vnics.extend([{"{#VNIC}": element.get(
+                'dev'), "{#DOMAINUUID}": domain.UUIDString()} for element in elements])
 
         return vnics
 
@@ -80,7 +79,8 @@ class LibvirtConnection(object):
         for domain in domains:
             tree = ElementTree.fromstring(domain.XMLDesc())
             elements = tree.findall('devices/disk/target')
-            vdisks = [{"{#VDISK}": element.get('dev'), "{#DOMAINUUID}": domain.UUIDString()} for element in elements]
+            vdisks = [{"{#VDISK}": element.get(
+                'dev'), "{#DOMAINUUID}": domain.UUIDString()} for element in elements]
 
         return vdisks
 
@@ -114,7 +114,7 @@ class LibvirtConnection(object):
                 "current_allocation": stats.get("actual", 0) * 1024}
 
     def get_virt_host(self):
-        """Get virtualizatio host's hostname"""
+        """Get virtualization host's hostname"""
         return self.conn.getHostname()
 
     def get_cpu(self, domain_uuid_string):
@@ -139,7 +139,7 @@ class LibvirtConnection(object):
         number_of_cpus = domain.info()[3]
 
         def _percent_usage(time1, time2):
-            return (time2-time1) / (number_of_cpus * SLEEP_TIME * 10**7)
+            return (time2 - time1) / (number_of_cpus * SLEEP_TIME * 10**7)
 
         return {"cpu_time": _percent_usage(stats_1['cpu_time'], stats_2['cpu_time']),
                 "system_time": _percent_usage(stats_1['system_time'], stats_2['system_time']),
@@ -183,5 +183,4 @@ class LibvirtConnection(object):
 
 
 if __name__ == "__main__":
-    """Do main things"""
     print("Main called")

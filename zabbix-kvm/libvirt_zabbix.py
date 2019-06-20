@@ -1,26 +1,16 @@
 #! /usr/bin/python
 
 """Perform libvirt checks and package the data for zabbix server."""
-
-
-import sys
-import json
-import time
-import functools
 import configparser
-
-import ssl
-import sslpsk
-
+from pyzabbix import ZabbixMetric
 from libvirt_checks import LibvirtConnection
-from pyzabbix import ZabbixMetric, ZabbixSender
 
 
-DOMAIN_KEY = "libvirt.domain.discover"
-VNICS_KEY = "libvirt.nic.discover"
-VDISKS_KEY = "libvirt.disk.discover"
 CONFIG_FILE = "/etc/zabbix-kvm/config.ini"
-HOSTS_FILE = "/etc/zabbix-kvm/iplist.txt"
+
+config = configparser.ConfigParser()
+config.read(CONFIG_FILE)
+HOST_IN_ZABBIX = config['general']['HOST_IN_ZABBIX']
 
 
 def make_metric(item_id, item_type, parameter, value):
@@ -30,8 +20,12 @@ def make_metric(item_id, item_type, parameter, value):
 
 
 class ZabbixLibvirt(object):
-    """This class uses LibvirtConnection to gather information and then uses
-    ZabbixSender to send it to our zabbix server
+    """This class uses LibvirtConnection to gather information and returns
+    ZabbixMetric for metrics only.
+
+    ZabbixMetric is not prepared for discovery items because we want the caller
+    to get the discover results from multiple instances of this class and then
+    prepare the ZabbixMetric.
     """
 
     def __init__(self, libvirt_uri=None):
@@ -157,92 +151,3 @@ class ZabbixLibvirt(object):
         metrics.extend(self._diskio_metric())
         metrics.extend(self._instance_attributes())
         return metrics
-
-
-class PyZabbixPSKSocketWrapper:
-    """Implements ssl.wrap_socket with PSK instead of certificates.
-
-    Proxies calls to a `socket` instance.
-
-    Thanks to @KostyaEsmukov for writing this.
-    See the comment and full example here:
-    https://github.com/adubkov/py-zabbix/issues/114#issue-430052782
-    """
-
-    def __init__(self, sock, identity, psk):
-        self.__sock = sock
-        self.__identity = identity
-        self.__psk = psk
-
-    def connect(self, *args, **kwargs):
-        # `sslpsk.wrap_socket` must be called *after* socket.connect,
-        # while the `ssl.wrap_socket` must be called *before* socket.connect.
-        self.__sock.connect(*args, **kwargs)
-
-        # `sslv3 alert bad record mac` exception means incorrect PSK
-        self.__sock = sslpsk.wrap_socket(
-            self.__sock,
-            # https://github.com/zabbix/zabbix/blob/f0a1ad397e5653238638cd1a65a25ff78c6809bb/src/libs/zbxcrypto/tls.c#L3231
-            ssl_version=ssl.PROTOCOL_TLSv1_2,
-            # https://github.com/zabbix/zabbix/blob/f0a1ad397e5653238638cd1a65a25ff78c6809bb/src/libs/zbxcrypto/tls.c#L3179
-            ciphers="PSK-AES128-CBC-SHA",
-            psk=(self.__psk, self.__identity),)
-
-    def __getattr__(self, name):
-        return getattr(self.__sock, name)
-
-
-def get_hosts():
-    """Read the ips/dns names from a file and return those bad boys"""
-
-    with open(HOSTS_FILE) as file:
-        data = file.read()
-    host_list = [item.strip() for item in data.split() if "#" not in item]
-
-    return host_list
-
-
-def main():
-    """main I guess"""
-    custom_wrapper = functools.partial(
-        PyZabbixPSKSocketWrapper, identity=PSK_IDENTITY, psk=bytes(bytearray.fromhex(PSK)))
-
-    zabbix_sender = ZabbixSender(
-        zabbix_server=ZABBIX_SERVER, socket_wrapper=custom_wrapper)
-
-    host_list = get_hosts()
-
-    all_discovered_domains = []
-    all_discovered_vnics = []
-    all_discovered_vdisks = []
-    combined_metrics = []
-
-    for host in host_list:
-        print("***For host: " + str(host))
-        uri = "qemu+ssh://root@" + host + "/system"
-        zbxlibvirt = ZabbixLibvirt(uri)
-
-        all_discovered_domains += zbxlibvirt.discover_domains()
-        all_discovered_vnics += zbxlibvirt.discover_all_vnics()
-        all_discovered_vdisks += zbxlibvirt.discover_all_vdisks()
-
-        combined_metrics.extend(zbxlibvirt.all_metrics())
-
-    print("***SENDING PACKET at ****" + str(time.ctime()))
-    zabbix_sender.send([ZabbixMetric(HOST_IN_ZABBIX, DOMAIN_KEY,
-                                     json.dumps({"data": all_discovered_domains}))])
-    zabbix_sender.send([ZabbixMetric(HOST_IN_ZABBIX, VNICS_KEY,
-                                     json.dumps({"data": all_discovered_vnics}))])
-    zabbix_sender.send([ZabbixMetric(HOST_IN_ZABBIX, VDISKS_KEY,
-                                     json.dumps({"data": all_discovered_vdisks}))])
-    zabbix_sender.send(combined_metrics)
-
-
-if __name__ == "__main__":
-    config = configparser.ConfigParser()
-    config.read(CONFIG_FILE)
-    PSK = config['general']['PSK']
-    PSK_IDENTITY = config['general']['PSK_IDENTITY']
-    HOST_IN_ZABBIX = config['general']['HOST_IN_ZABBIX']
-    ZABBIX_SERVER = config['general']['ZABBIX_SERVER']
-    main()
