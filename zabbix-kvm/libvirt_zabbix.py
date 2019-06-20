@@ -19,8 +19,8 @@ from pyzabbix import ZabbixMetric, ZabbixSender
 DOMAIN_KEY = "libvirt.domain.discover"
 VNICS_KEY = "libvirt.nic.discover"
 VDISKS_KEY = "libvirt.disk.discover"
-CONFIG_FILE = "/etc/libvirt-checks/config.ini"
-HOSTS_FILE = "/etc/libvirt-checks/iplist.txt"
+CONFIG_FILE = "/etc/zabbix-kvm/config.ini"
+HOSTS_FILE = "/etc/zabbix-kvm/iplist.txt"
 
 
 def make_metric(item_id, item_type, parameter, value):
