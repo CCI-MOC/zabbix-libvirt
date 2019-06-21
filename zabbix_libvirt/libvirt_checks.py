@@ -4,9 +4,9 @@ various methods to get useful information
 """
 
 import time
-import sys
 from xml.etree import ElementTree
 import libvirt
+from errors import LibvirtConnectionError, DomainNotFoundError
 
 
 SLEEP_TIME = 1
@@ -19,15 +19,15 @@ class LibvirtConnection(object):
 
     @staticmethod
     def libvirt_callback(userdata, err):
+        """Error handler"""
         pass
 
     def __init__(self, uri=None):
         """Creates a read only connection to libvirt"""
         self.conn = libvirt.openReadOnly(uri)
         if self.conn is None:
-            sys.stdout.write("Failed to open connection to the hypervisor")
-            # FIXME: Need to figure out if exiting is the right thing to do here.
-            sys.exit(1)
+            raise LibvirtConnectionError(
+                "Failed to open connection to the hypervisor: " + str(uri))
 
         # We set this because when libvirt errors are raised, they are still
         # printed to console (stderr) even if you catch them.
@@ -39,17 +39,15 @@ class LibvirtConnection(object):
         """Find the domain by uuid and return domain object"""
         domain = self.conn.lookupByUUIDString(domain_uuid_string)
         if domain is None:
-            sys.stdout.write("Failed to find domain: " + domain_uuid_string)
-            sys.exit(1)
+            raise DomainNotFoundError(
+                "Failed to find domain: " + domain_uuid_string)
         return domain
 
     def discover_domains(self):
-        """Return all active domains.
-
-        Inactive domains will be discovered in the next run if they become active"""
+        """Return all domains"""
         domains = self.conn.listAllDomains()
         domains = [{"{#DOMAINNAME}": domain.name(), "{#DOMAINUUID}": domain.UUIDString()}
-                   for domain in domains if domain.isActive()]
+                   for domain in domains]
         return domains
 
     def discover_all_vnics(self):
@@ -57,7 +55,6 @@ class LibvirtConnection(object):
 
         Returns a list of dictionary with vnics name and associated domain's uuid"""
         domains = self.conn.listAllDomains()
-        domains = [domain for domain in domains if domain.isActive()]
 
         vnics = []
         for domain in domains:
@@ -73,7 +70,6 @@ class LibvirtConnection(object):
 
         Returns a list of dictionary with vdisks name and associated domain's uuid"""
         domains = self.conn.listAllDomains()
-        domains = [domain for domain in domains if domain.isActive()]
 
         vdisks = []
         for domain in domains:
@@ -179,7 +175,7 @@ class LibvirtConnection(object):
     def is_active(self, domain_uuid_string):
         """Returns 1 if domain is active, 0 otherwise."""
         domain = self._get_domain_by_uuid(domain_uuid_string)
-        sys.stdout.write(str(domain.isActive()))
+        return domain.isActive()
 
 
 if __name__ == "__main__":

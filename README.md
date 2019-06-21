@@ -24,6 +24,6 @@ It will be updated to monitor using zabbix agents.
 
 ## Deploy
 
-1. Create a configuration file (see `examples/config.ini`) at `/etc/libvirt-checks/`.
-2. Put the list of IP addreses or hostnames at `/etc/libvirt-checks/`.
-3. And call `main.py` with whatever frequency your zabbix server can handle. You can setup a cron job.
+1. Create a configuration file (see `examples/config.ini`) at `/etc/zabbix-libvirt/`.
+2. Create a hosts file (see `examples/hosts.txt`) and put the path to it in the config file.
+3. Call `main.py` with whatever frequency your zabbix server can handle. You can setup a cron job.

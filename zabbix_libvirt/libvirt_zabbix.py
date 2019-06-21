@@ -6,7 +6,7 @@ from pyzabbix import ZabbixMetric
 from libvirt_checks import LibvirtConnection
 
 
-CONFIG_FILE = "/etc/zabbix-kvm/config.ini"
+CONFIG_FILE = "/etc/zabbix-libvirt/config.ini"
 
 config = configparser.ConfigParser()
 config.read(CONFIG_FILE)
