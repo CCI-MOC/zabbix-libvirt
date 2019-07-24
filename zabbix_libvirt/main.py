@@ -26,13 +26,15 @@ def get_hosts():
     host_list = [item.strip() for item in data.split() if "#" not in item]
     return host_list
 
+
 def setup_logging(name):
     """Setup logger with some custom formatting"""
     formatter = logging.Formatter(fmt='%(asctime)s %(levelname)-8s %(message)s',
                                   datefmt='%Y-%m-%d %H:%M:%S')
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
-    handler = logging.handlers.RotatingFileHandler(LOG_FILE, mode="a", maxBytes=5*2**20)
+    handler = logging.handlers.RotatingFileHandler(
+        LOG_FILE, mode="a", maxBytes=5 * 2**20)
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     return logger
@@ -59,7 +61,7 @@ def main():
     for host in host_list:
 
         logger.info("Starting to process host: %s", host)
-        uri = "qemu+ssh://root@" + host + "/system"
+        uri = "qemu+ssh://root@" + host + "/system?keyfile=" + KEY_FILE
 
         try:
             zbxlibvirt = ZabbixLibvirt(uri)
@@ -104,4 +106,5 @@ if __name__ == "__main__":
     ZABBIX_SERVER = config['general']['ZABBIX_SERVER']
     LOG_FILE = config['general']['LOG_DIR'] + "zabbix-libvirt.log"
     HOSTS_FILE = config['general']['HOSTS_FILE']
+    KEY_FILE = config['general']['KEY_FILE']
     main()
