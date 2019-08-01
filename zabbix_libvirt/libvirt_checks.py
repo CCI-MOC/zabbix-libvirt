@@ -37,8 +37,9 @@ class LibvirtConnection(object):
 
     def _get_domain_by_uuid(self, domain_uuid_string):
         """Find the domain by uuid and return domain object"""
-        domain = self.conn.lookupByUUIDString(domain_uuid_string)
-        if domain is None:
+        try:
+            domain = self.conn.lookupByUUIDString(domain_uuid_string)
+        except libvirt.libvirtError as e:
             raise DomainNotFoundError(
                 "Failed to find domain: " + domain_uuid_string)
         return domain
