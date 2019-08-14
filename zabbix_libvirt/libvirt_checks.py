@@ -39,7 +39,7 @@ class LibvirtConnection(object):
         """Find the domain by uuid and return domain object"""
         try:
             domain = self.conn.lookupByUUIDString(domain_uuid_string)
-        except libvirt.libvirtError as e:
+        except libvirt.libvirtError:
             raise DomainNotFoundError(
                 "Failed to find domain: " + domain_uuid_string)
         return domain
@@ -47,39 +47,25 @@ class LibvirtConnection(object):
     def discover_domains(self):
         """Return all domains"""
         domains = self.conn.listAllDomains()
-        domains = [{"{#DOMAINNAME}": domain.name(), "{#DOMAINUUID}": domain.UUIDString()}
-                   for domain in domains]
-        return domains
+        return [domain.UUIDString() for domain in domains]
 
-    def discover_all_vnics(self):
-        """Discover all vnics for all domains.
+    def discover_vnics(self, domain_uuid_string):
+        """Discover all virtual NICs on a domain.
 
-        Returns a list of dictionary with vnics name and associated domain's uuid"""
-        domains = self.conn.listAllDomains()
+        Returns a list of dictionary with "{#VNIC}"s name and domain's uuid"""
+        domain = self._get_domain_by_uuid(domain_uuid_string)
+        tree = ElementTree.fromstring(domain.XMLDesc())
+        elements = tree.findall('devices/interface/target')
+        return [{"{#VNIC}": element.get('dev'), "{#DOMAINUUID}": domain.UUIDString()} for element in elements]
 
-        vnics = []
-        for domain in domains:
-            tree = ElementTree.fromstring(domain.XMLDesc())
-            elements = tree.findall('devices/interface/target')
-            vnics.extend([{"{#VNIC}": element.get(
-                'dev'), "{#DOMAINUUID}": domain.UUIDString()} for element in elements])
+    def discover_vdisks(self, domain_uuid_string):
+        """Discover all virtual disk drives on a domain.
 
-        return vnics
-
-    def discover_all_vdisks(self):
-        """Discover all virtual disk drives.
-
-        Returns a list of dictionary with vdisks name and associated domain's uuid"""
-        domains = self.conn.listAllDomains()
-
-        vdisks = []
-        for domain in domains:
-            tree = ElementTree.fromstring(domain.XMLDesc())
-            elements = tree.findall('devices/disk/target')
-            vdisks = [{"{#VDISK}": element.get(
-                'dev'), "{#DOMAINUUID}": domain.UUIDString()} for element in elements]
-
-        return vdisks
+        Returns a list of dictionary with "{#VDISK}"s name and domain's uuid"""
+        domain = self._get_domain_by_uuid(domain_uuid_string)
+        tree = ElementTree.fromstring(domain.XMLDesc())
+        elements = tree.findall('devices/disk/target')
+        return [{"{#VDISK}": element.get('dev'), "{#DOMAINUUID}": domain.UUIDString()} for element in elements]
 
     def get_memory(self, domain_uuid_string):
         """Get memorystats for domain.
@@ -181,3 +167,11 @@ class LibvirtConnection(object):
 
 if __name__ == "__main__":
     print("Main called")
+    a = LibvirtConnection()
+    domains = a.discover_domains()
+    print(domains)
+    for domain in domains:
+        print(a.is_active(domain))
+        print(a.get_cpu(domain))
+        print(a.discover_vdisks(domain))
+        print(a.discover_vnics(domain))
