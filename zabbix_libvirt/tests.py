@@ -1,7 +1,8 @@
-import configparser
+"""Some tests"""
+
 from libvirt_checks import LibvirtConnection
 from zabbix_methods import ZabbixConnection
-from errors import LibvirtConnectionError, DomainNotFoundError
+from helper import config, load_config
 
 CONFIG_FILE = "/etc/zabbix-libvirt/config.ini"
 
@@ -41,9 +42,7 @@ def test_zabbix_connection_all():
 
     The test will perform a bunch of CRUD operations and make assertions
     on the way that things are working as expected."""
-
-    config = configparser.ConfigParser()
-    config.read(CONFIG_FILE)
+    load_config()
 
     user = config['general']['API_USER']
     server = "https://" + config['general']['ZABBIX_SERVER']
