@@ -96,9 +96,11 @@ class LibvirtConnection(object):
                 "available": stats.get("usable", 0) * 1024,
                 "current_allocation": stats.get("actual", 0) * 1024}
 
-    def get_virt_host(self):
+    def get_misc_attributes(self, domain_uuid_string):
         """Get virtualization host's hostname"""
-        return self.conn.getHostname()
+        domain = self._get_domain_by_uuid(domain_uuid_string)
+        return {"virt_host": self.conn.getHostname(),
+                "name": domain.name()}
 
     def get_cpu(self, domain_uuid_string):
         """Get CPU statistics. Libvirt returns the stats in nanoseconds.
@@ -175,3 +177,4 @@ if __name__ == "__main__":
         print(a.get_cpu(domain))
         print(a.discover_vdisks(domain))
         print(a.discover_vnics(domain))
+        print(a.get_misc_attributes(domain))
