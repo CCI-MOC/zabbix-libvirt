@@ -20,7 +20,6 @@ def test_libvirt_all():
 
     for domain in domains:
         print domain
-        print conn.get_virt_host()
 
         print conn.is_active(domain)
         print conn.get_cpu(domain)
