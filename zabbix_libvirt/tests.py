@@ -1,5 +1,6 @@
 """Some tests"""
 
+import subprocess
 from libvirt_checks import LibvirtConnection
 from zabbix_methods import ZabbixConnection
 from helper import config, load_config
@@ -54,6 +55,9 @@ def test_zabbix_connection_all():
 
     test_host_name = "apo12o12opk"
 
+    identity = "test-random-identity"
+    psk = subprocess.check_output("openssl rand -hex 32".split())
+
     with ZabbixConnection(user, server, password) as zapi:
         # check that we get the correct group ids
         groupid = zapi.get_group_id(group_name)
@@ -66,7 +70,8 @@ def test_zabbix_connection_all():
         assert zapi.get_host_id(test_host_name) is None
 
         # Create the host
-        host_id = zapi.create_host(test_host_name, groupid, templateid)
+        host_id = zapi.create_host(
+            test_host_name, groupid, templateid, identity, psk)
 
         # Ensure that host is now created.
         assert test_host_name in zapi.get_all_hosts()

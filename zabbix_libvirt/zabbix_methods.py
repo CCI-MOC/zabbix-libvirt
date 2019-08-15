@@ -1,8 +1,5 @@
-
 """Create a host on zabbix server"""
 
-
-import configparser
 import pyzabbix
 
 CONFIG_FILE = "/etc/zabbix-libvirt/config.ini"
@@ -28,7 +25,7 @@ class ZabbixConnection(object):
         """Login to zabbix server"""
         return pyzabbix.ZabbixAPI(user=user, url=server, password=password)
 
-    def create_host(self, host_name, groupid, templateid):
+    def create_host(self, host_name, groupid, templateid, tls_psk_identity, tls_psk):
         """Create a host in zabbix"""
 
         # The interfaces are arbritary here since we will only use zabbix trapper
@@ -40,6 +37,10 @@ class ZabbixConnection(object):
 
         results = self.session.do_request("host.create", {
             "host": host_name,
+            "tls_connect": 2,
+            "tls_accept": 2,
+            "tls_psk_identity": tls_psk_identity,
+            "tls_psk": tls_psk,
             "interfaces": interfaces,
             "groups": groups,
             "templates": templates})["result"]
@@ -82,7 +83,7 @@ class ZabbixConnection(object):
 
 
 def main():
-    """main"""
+    """Main things happen here"""
     print("I do nothing")
 
 
