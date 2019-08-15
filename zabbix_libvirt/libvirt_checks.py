@@ -56,7 +56,7 @@ class LibvirtConnection(object):
         domain = self._get_domain_by_uuid(domain_uuid_string)
         tree = ElementTree.fromstring(domain.XMLDesc())
         elements = tree.findall('devices/interface/target')
-        return [{"{#VNIC}": element.get('dev'), "{#DOMAINUUID}": domain.UUIDString()} for element in elements]
+        return [{"{#VNIC}": element.get('dev')} for element in elements]
 
     def discover_vdisks(self, domain_uuid_string):
         """Discover all virtual disk drives on a domain.
@@ -65,7 +65,7 @@ class LibvirtConnection(object):
         domain = self._get_domain_by_uuid(domain_uuid_string)
         tree = ElementTree.fromstring(domain.XMLDesc())
         elements = tree.findall('devices/disk/target')
-        return [{"{#VDISK}": element.get('dev'), "{#DOMAINUUID}": domain.UUIDString()} for element in elements]
+        return [{"{#VDISK}": element.get('dev')} for element in elements]
 
     def get_memory(self, domain_uuid_string):
         """Get memorystats for domain.
