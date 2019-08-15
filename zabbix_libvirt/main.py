@@ -20,6 +20,7 @@ def update_instance(domain_uuid_string, libvirt_connection, zabbix_sender):
     `libvirt_connection` and then send the zabbix metrics using `zabbix_sender`
     """
     # 1. Discover nics and disks, and send the discovery packet
+    print("Updating instance")
     vnics = libvirt_connection.discover_vnics(domain_uuid_string)
     vdisks = libvirt_connection.discover_vdisks(domain_uuid_string)
 
@@ -67,6 +68,7 @@ def update_instance(domain_uuid_string, libvirt_connection, zabbix_sender):
                                     "libvirt.instance[{}]".format(stat), value))
 
     zabbix_sender.send(metrics)
+    print("Done updating")
 
 
 def main():
@@ -78,7 +80,7 @@ def main():
     custom_wrapper = functools.partial(
         PyZabbixPSKSocketWrapper, identity=PSK_IDENTITY, psk=bytes(bytearray.fromhex(PSK)))
     zabbix_sender = ZabbixSender(
-        zabbix_server=ZABBIX_SERVER, socket_wrapper=custom_wrapper)
+        zabbix_server=ZABBIX_SERVER, socket_wrapper=custom_wrapper, timeout=30)
 
     with ZabbixConnection(USER, "https://" + ZABBIX_SERVER, PASSWORD) as zapi:
 
@@ -104,7 +106,8 @@ def main():
             for domain in domains:
                 try:
                     if zapi.get_host_id(domain) is None:
-                        zapi.create_host(domain, groupid, templateid)
+                        zapi.create_host(
+                            domain, groupid, templateid, PSK_IDENTITY, PSK)
                     update_instance(domain, libvirt_connection, zabbix_sender)
                 except ZabbixAPIException as error:
                     print("************EXCEPTION************")
