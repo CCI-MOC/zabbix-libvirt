@@ -25,9 +25,9 @@ def update_instance(domain_uuid_string, libvirt_connection, zabbix_sender):
     vdisks = libvirt_connection.discover_vdisks(domain_uuid_string)
 
     zabbix_sender.send([ZabbixMetric(domain_uuid_string, VNICS_KEY,
-                                     json.dumps({"data": vnics}))])
+                                     json.dumps(vnics))])
     zabbix_sender.send([ZabbixMetric(domain_uuid_string, VDISKS_KEY,
-                                     json.dumps({"data": vdisks}))])
+                                     json.dumps(vdisks))])
 
     # FIXME: Perhaps a helper function can simplify the following stuff
     # 2. Gather metrics for all disks
