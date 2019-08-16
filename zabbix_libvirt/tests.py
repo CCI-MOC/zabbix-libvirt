@@ -25,6 +25,7 @@ def test_libvirt_all():
         print conn.is_active(domain)
         print conn.get_cpu(domain)
         print conn.get_memory(domain)
+        print conn.get_misc_attributes(domain)
         vdisks = conn.discover_vdisks(domain)
         vnics = conn.discover_vnics(domain)
         print vdisks

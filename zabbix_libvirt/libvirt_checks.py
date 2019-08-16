@@ -49,12 +49,31 @@ class LibvirtConnection(object):
         domains = self.conn.listAllDomains()
         return [domain.UUIDString() for domain in domains]
 
+    def _get_domain_xmldump(self, domain_uuid_string):
+        """Return domain xml dump"""
+        domain = self._get_domain_by_uuid(domain_uuid_string)
+        return ElementTree.fromstring(domain.XMLDesc())
+
+    def _get_instance_attributes(self, domain_uuid_string):
+        """Returns openstack specific instance attributes"""
+        tree = self._get_domain_xmldump(domain_uuid_string)
+
+        namespaces = {"nova": "http://openstack.org/xmlns/libvirt/nova/1.0"}
+        element = tree.find("metadata/nova:instance/nova:owner", namespaces)
+
+        if element is None:
+            return "non-openstack-instance", "non-openstack-instance"
+
+        user_uuid = element.find("nova:user", namespaces).get("uuid")
+        project_uuid = element.find("nova:project", namespaces).get("uuid")
+
+        return user_uuid, project_uuid
+
     def discover_vnics(self, domain_uuid_string):
         """Discover all virtual NICs on a domain.
 
         Returns a list of dictionary with "{#VNIC}"s name and domain's uuid"""
-        domain = self._get_domain_by_uuid(domain_uuid_string)
-        tree = ElementTree.fromstring(domain.XMLDesc())
+        tree = self._get_domain_xmldump(domain_uuid_string)
         elements = tree.findall('devices/interface/target')
         return [{"{#VNIC}": element.get('dev')} for element in elements]
 
@@ -62,8 +81,7 @@ class LibvirtConnection(object):
         """Discover all virtual disk drives on a domain.
 
         Returns a list of dictionary with "{#VDISK}"s name and domain's uuid"""
-        domain = self._get_domain_by_uuid(domain_uuid_string)
-        tree = ElementTree.fromstring(domain.XMLDesc())
+        tree = self._get_domain_xmldump(domain_uuid_string)
         elements = tree.findall('devices/disk/target')
         return [{"{#VDISK}": element.get('dev')} for element in elements]
 
@@ -99,8 +117,13 @@ class LibvirtConnection(object):
     def get_misc_attributes(self, domain_uuid_string):
         """Get virtualization host's hostname"""
         domain = self._get_domain_by_uuid(domain_uuid_string)
+        user_uuid, project_uuid = self._get_instance_attributes(
+            domain_uuid_string)
+
         return {"virt_host": self.conn.getHostname(),
-                "name": domain.name()}
+                "name": domain.name(),
+                "user_uuid": user_uuid,
+                "project_uuid": project_uuid}
 
     def get_cpu(self, domain_uuid_string):
         """Get CPU statistics. Libvirt returns the stats in nanoseconds.
