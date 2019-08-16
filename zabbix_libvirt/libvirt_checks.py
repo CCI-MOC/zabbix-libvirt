@@ -192,12 +192,3 @@ class LibvirtConnection(object):
 
 if __name__ == "__main__":
     print("Main called")
-    a = LibvirtConnection()
-    domains = a.discover_domains()
-    print(domains)
-    for domain in domains:
-        print(a.is_active(domain))
-        print(a.get_cpu(domain))
-        print(a.discover_vdisks(domain))
-        print(a.discover_vnics(domain))
-        print(a.get_misc_attributes(domain))
