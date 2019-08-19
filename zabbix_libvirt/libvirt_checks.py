@@ -24,7 +24,10 @@ class LibvirtConnection(object):
 
     def __init__(self, uri=None):
         """Creates a read only connection to libvirt"""
-        self.conn = libvirt.openReadOnly(uri)
+        try:
+            self.conn = libvirt.openReadOnly(uri)
+        except libvirt.libvirtError as error:
+            raise LibvirtConnectionError(error)
         if self.conn is None:
             raise LibvirtConnectionError(
                 "Failed to open connection to the hypervisor: " + str(uri))
