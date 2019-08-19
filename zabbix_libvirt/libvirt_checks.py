@@ -126,7 +126,8 @@ class LibvirtConnection(object):
         return {"virt_host": self.conn.getHostname(),
                 "name": domain.name(),
                 "user_uuid": user_uuid,
-                "project_uuid": project_uuid}
+                "project_uuid": project_uuid,
+                "active": self.is_active(domain_uuid_string)}
 
     def get_cpu(self, domain_uuid_string):
         """Get CPU statistics. Libvirt returns the stats in nanoseconds.
