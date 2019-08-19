@@ -29,44 +29,33 @@ def update_instance(domain_uuid_string, libvirt_connection, zabbix_sender):
     zabbix_sender.send([ZabbixMetric(domain_uuid_string, VDISKS_KEY,
                                      json.dumps(vdisks))])
 
-    # FIXME: Perhaps a helper function can simplify the following stuff
-    # 2. Gather metrics for all disks
     metrics = []
+
+    def _create_metric(stats, item_type, item_subtype=None):
+        """Helper function to create and append to the metrics list"""
+        for stat, value in stats.iteritems():
+
+            if item_subtype is not None:
+                stat = "{},{}".format(item_subtype, stat)
+
+            key = "libvirt.{}[{}]".format(item_type, stat)
+            metrics.append(ZabbixMetric(domain_uuid_string, key, value))
+
     for vdisk in vdisks:
         stats = libvirt_connection.get_diskio(
             domain_uuid_string, vdisk["{#VDISK}"])
-
-        for stat, value in stats.iteritems():
-            metrics.append(
-                ZabbixMetric(domain_uuid_string, "libvirt.disk[{},{}]".format(vdisk["{#VDISK}"],
-                                                                              stat), value))
+        _create_metric(stats, "disk", vdisk["{#VDISK}"])
 
     # 3. Gather metrics for all nics
     for vnic in vnics:
         stats = libvirt_connection.get_ifaceio(
             domain_uuid_string, vnic["{#VNIC}"])
+        _create_metric(stats, "nic", vnic["{#VNIC}"])
 
-        for stat, value in stats.iteritems():
-            metrics.append(ZabbixMetric(
-                domain_uuid_string, "libvirt.nic[{},{}]".format(vnic["{#VNIC}"], stat), value))
-
-    # 4. Gather metrics for memory
-    memory = libvirt_connection.get_memory(domain_uuid_string)
-    for stat, value in memory.iteritems():
-        metrics.append(ZabbixMetric(domain_uuid_string,
-                                    "libvirt.memory[{}]".format(stat), value))
-
-    # 5. Gather CPU metrics
-    cpu = libvirt_connection.get_cpu(domain_uuid_string)
-    for stat, value in cpu.iteritems():
-        metrics.append(ZabbixMetric(domain_uuid_string,
-                                    "libvirt.cpu[{}]".format(stat), value))
-    # 6. Gather misc stats
-    misc = libvirt_connection.get_misc_attributes(domain_uuid_string)
-    for stat, value in misc.iteritems():
-        metrics.append(ZabbixMetric(domain_uuid_string,
-                                    "libvirt.instance[{}]".format(stat), value))
-
+    _create_metric(libvirt_connection.get_memory(domain_uuid_string), "memory")
+    _create_metric(libvirt_connection.get_cpu(domain_uuid_string), "cpu")
+    _create_metric(libvirt_connection.get_misc_attributes(
+        domain_uuid_string), "instance")
     zabbix_sender.send(metrics)
 
 
