@@ -76,6 +76,17 @@ class ZabbixConnection(object):
             return None
         return results[0]["hostid"]
 
+    def get_item(self, host_id, item_key, item_attribute="lastvalue"):
+        """Get the value of an item with item_key on host with host_id.
+
+        By default it will return the last value of the item"""
+
+        results = self.session.do_request(
+            "item.get", {"hostids": host_id, "search": {"key_": item_key}})["result"]
+        for result in results:
+            if result["key_"] == item_key:
+                return result.get(item_attribute)
+
     def delete_hosts(self, host_ids):
         """Delete a host in zabbix"""
         result = self.session.do_request("host.delete", host_ids)["result"]
