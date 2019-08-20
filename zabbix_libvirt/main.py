@@ -146,7 +146,7 @@ def main():
                     logger.exception(error)
                     raise
 
-        all_zabbix_hosts = zapi.get_all_hosts()
+        all_zabbix_hosts = zapi.get_all_hosts([openstack_group_id])
         hosts_not_in_openstack = list(
             set(all_zabbix_hosts) - set(all_openstack_instances))
 

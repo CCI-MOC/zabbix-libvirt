@@ -46,10 +46,20 @@ class ZabbixConnection(object):
             "templates": templates})["result"]
         return results["hostids"][0]
 
-    def get_all_hosts(self):
-        """Find all monitored hosts"""
+    def get_all_hosts(self, groupids=None):
+        """
+        Find all monitored hosts.
+
+        groupdis: Return only hosts that belong to the given groups. This means
+        group belonging to either of the group ids in the list (a union).
+        """
+        if groupids is None:
+            parameters = {"monitored_hosts": 1}
+        else:
+            parameters = {"groupids": groupids, "monitored_hosts": 1}
+        print(parameters)
         results = self.session.do_request(
-            "host.get", {"monitored_hosts": 1})["result"]
+            "host.get", parameters)["result"]
         return [result["name"] for result in results]
 
     def get_group_id(self, group_name):
