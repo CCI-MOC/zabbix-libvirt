@@ -25,14 +25,14 @@ class ZabbixConnection(object):
         """Login to zabbix server"""
         return pyzabbix.ZabbixAPI(user=user, url=server, password=password)
 
-    def create_host(self, host_name, groupid, templateid, tls_psk_identity, tls_psk):
+    def create_host(self, host_name, groupids, templateid, tls_psk_identity, tls_psk):
         """Create a host in zabbix"""
 
         # The interfaces are arbritary here since we will only use zabbix trapper
         # items to communicate.
         interfaces = {"type": 1, "main": 1, "useip": 1, "ip": "127.0.0.1",
                       "dns": "", "port": "10069"}
-        groups = [{"groupid": groupid}]
+        groups = [{"groupid": i} for i in groupids]
         templates = [{"templateid": templateid}]
 
         results = self.session.do_request("host.create", {
@@ -91,6 +91,12 @@ class ZabbixConnection(object):
         """Delete a host in zabbix"""
         result = self.session.do_request("host.delete", host_ids)["result"]
         return sorted(result["hostids"])
+
+    def create_hostgroup(self, hostgroup):
+        """Create a host group and return the group id"""
+        result = self.session.do_request(
+            "hostgroup.create", {"name": hostgroup})["result"]
+        return result["groupids"][0]
 
 
 def main():

@@ -103,7 +103,7 @@ def main():
 
     with ZabbixConnection(USER, "https://" + ZABBIX_SERVER, PASSWORD) as zapi:
 
-        groupid = zapi.get_group_id(GROUP_NAME)
+        openstack_group_id = zapi.get_group_id(GROUP_NAME)
         templateid = zapi.get_template_id(TEMPLATE_NAME)
 
         for host in host_list:
@@ -120,11 +120,23 @@ def main():
 
             domains = libvirt_connection.discover_domains()
             all_openstack_instances.extend(domains)
+
             for domain in domains:
+
                 try:
+                    project = libvirt_connection.get_misc_attributes(domain)[
+                        "project_uuid"]
+                    project_group_id = zapi.get_group_id(project)
+
+                    if project_group_id is None:
+                        project_group_id = zapi.create_hostgroup(project)
+
+                    groupids = [openstack_group_id, project_group_id]
+
                     if zapi.get_host_id(domain) is None:
                         zapi.create_host(
-                            domain, groupid, templateid, PSK_IDENTITY, PSK)
+                            domain, groupids, templateid, PSK_IDENTITY, PSK)
+
                     update_instance(domain, libvirt_connection, zabbix_sender)
                 except DomainNotFoundError as error:
                     # This may happen if a domain is deleted after we discover
