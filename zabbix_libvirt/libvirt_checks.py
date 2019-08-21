@@ -9,9 +9,6 @@ import libvirt
 from errors import LibvirtConnectionError, DomainNotFoundError
 
 
-SLEEP_TIME = 1
-
-
 class LibvirtConnection(object):
     """This class opens a connection to libvirt and provides with methods
     to get useuful information about domains.
@@ -132,30 +129,32 @@ class LibvirtConnection(object):
     def get_cpu(self, domain_uuid_string):
         """Get CPU statistics. Libvirt returns the stats in nanoseconds.
 
-        Returns the overall percent usage.
+        Returns the cpu time in nanoseconds.
+        Caller has to do the math to calculate percentage utilization.
+
+        See the stack overflow article to understand what it means.
+        https://stackoverflow.com/questions/40468370/what-does-cpu-time-represent-exactly-in-libvirt
         """
         domain = self._get_domain_by_uuid(domain_uuid_string)
 
         try:
-            stats_1 = domain.getCPUStats(True)[0]
-            time.sleep(SLEEP_TIME)
-            stats_2 = domain.getCPUStats(True)[0]
+            stats = domain.getCPUStats(True)[0]
+            timestamp = time.time()
+            cpu_time = stats['cpu_time'] - \
+                stats['system_time'] - stats['user_time']
         except libvirt.libvirtError:
-            # If the domain is not running, then the cpu usage is 0.
-            # If the error is due to other reasons, then re-raise the error.
+            # If the error is due to reasons other than being powered off,
+            # then re-raise the error.
+            timestamp = time.time()
             if domain.isActive():
                 raise
             else:
-                return {"cpu_time": 0, "system_time": 0, "user_time": 0}
+                # Send 0 if the instance is off
+                cpu_time = 0
 
-        number_of_cpus = domain.info()[3]
-
-        def _percent_usage(time1, time2):
-            return (time2 - time1) / (number_of_cpus * SLEEP_TIME * 10**7)
-
-        return {"cpu_time": _percent_usage(stats_1['cpu_time'], stats_2['cpu_time']),
-                "system_time": _percent_usage(stats_1['system_time'], stats_2['system_time']),
-                "user_time": _percent_usage(stats_1['user_time'], stats_2['user_time'])}
+        return {"cpu_time": cpu_time,
+                "core_count": domain.info()[3],
+                "timestamp": timestamp}
 
     def get_ifaceio(self, domain_uuid_string, iface):
         """Get Network I / O"""
