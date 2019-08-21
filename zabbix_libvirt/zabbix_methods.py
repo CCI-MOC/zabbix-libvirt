@@ -2,8 +2,6 @@
 
 import pyzabbix
 
-CONFIG_FILE = "/etc/zabbix-libvirt/config.ini"
-
 
 class ZabbixConnection(object):
     """This class will provide an object that lets you create, update, delete,
@@ -57,7 +55,6 @@ class ZabbixConnection(object):
             parameters = {"monitored_hosts": 1}
         else:
             parameters = {"groupids": groupids, "monitored_hosts": 1}
-        print(parameters)
         results = self.session.do_request(
             "host.get", parameters)["result"]
         return [result["name"] for result in results]
@@ -96,6 +93,7 @@ class ZabbixConnection(object):
         for result in results:
             if result["key_"] == item_key:
                 return result.get(item_attribute)
+        return None
 
     def delete_hosts(self, host_ids):
         """Delete a host in zabbix"""

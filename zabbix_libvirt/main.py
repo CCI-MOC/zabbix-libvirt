@@ -1,3 +1,4 @@
+#!/usr/bin/env python2
 """The main module that orchestrates everything"""
 
 import json
@@ -57,6 +58,7 @@ def update_instance(domain_uuid_string, libvirt_connection, zabbix_sender):
     _create_metric(libvirt_connection.get_misc_attributes(
         domain_uuid_string), "instance")
     zabbix_sender.send(metrics)
+    logger.info("Domain %s is updated", domain_uuid_string)
 
 
 def cleanup_hosts(hosts, zabbix_api):
@@ -134,6 +136,7 @@ def main():
                     groupids = [openstack_group_id, project_group_id]
 
                     if zapi.get_host_id(domain) is None:
+                        logger.info("Creating new instance: %s", domain)
                         zapi.create_host(
                             domain, groupids, templateid, PSK_IDENTITY, PSK)
 
@@ -141,8 +144,10 @@ def main():
                 except DomainNotFoundError as error:
                     # This may happen if a domain is deleted after we discover
                     # it. In that case we log the error and move on.
+                    logger.error("Domain %s not found", domain)
                     logger.exception(error)
                 except ZabbixAPIException as error:
+                    logger.error("Zabbix API error")
                     logger.exception(error)
                     raise
 
