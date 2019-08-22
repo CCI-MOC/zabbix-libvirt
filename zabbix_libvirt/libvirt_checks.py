@@ -137,23 +137,11 @@ class LibvirtConnection(object):
         """
         domain = self._get_domain_by_uuid(domain_uuid_string)
 
-        try:
-            stats = domain.getCPUStats(True)[0]
-            timestamp = time.time()
-            cpu_time = stats['cpu_time'] - \
-                stats['system_time'] - stats['user_time']
-        except libvirt.libvirtError:
-            # If the error is due to reasons other than being powered off,
-            # then re-raise the error.
-            timestamp = time.time()
-            if domain.isActive():
-                raise
-            else:
-                # Send 0 if the instance is off
-                cpu_time = 0
+        info = domain.info()
+        timestamp = time.time()
 
-        return {"cpu_time": cpu_time,
-                "core_count": domain.info()[3],
+        return {"cpu_time": info[4],
+                "core_count": info[3],
                 "timestamp": timestamp}
 
     def get_ifaceio(self, domain_uuid_string, iface):
