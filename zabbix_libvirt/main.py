@@ -4,6 +4,7 @@
 import json
 import functools
 import time
+from multiprocessing import Pool
 
 from pyzabbix import ZabbixMetric, ZabbixSender
 from pyzabbix.api import ZabbixAPIException
@@ -59,54 +60,58 @@ def get_instance_metrics(domain_uuid_string, libvirt_connection):
     return metrics
 
 
-def process_host(host, zabbix_api, zabbix_sender):
+def process_host(host, zabbix_sender):
     """Takes in host, and then process the domains on that host"""
+    print("Processing Host: %s", host)
     logger = setup_logging(__name__ + host, LOG_DIR + "/" + host)
 
-    openstack_group_id = zabbix_api.get_group_id(GROUP_NAME)
-    templateid = zabbix_api.get_template_id(TEMPLATE_NAME)
+    with ZabbixConnection(USER, "https://" + ZABBIX_SERVER, PASSWORD) as zabbix_api:
 
-    logger.info("Starting to process host: %s", host)
-    uri = "qemu+ssh://root@" + host + "/system?keyfile=" + KEY_FILE
+        openstack_group_id = zabbix_api.get_group_id(GROUP_NAME)
+        templateid = zabbix_api.get_template_id(TEMPLATE_NAME)
 
-    try:
-        libvirt_connection = LibvirtConnection(uri)
-    except LibvirtConnectionError as error:
-        # Log the failure to connect to a host, but continue processing
-        # other hosts.
-        logger.exception(error)
-        return
+        logger.info("Starting to process host: %s", host)
+        uri = "qemu+ssh://root@" + host + "/system?keyfile=" + KEY_FILE
 
-    domains = libvirt_connection.discover_domains()
-    for domain in domains:
         try:
-            project = libvirt_connection.get_misc_attributes(domain)[
-                "project_uuid"]
-            project_group_id = zabbix_api.get_group_id(project)
-
-            if project_group_id is None:
-                project_group_id = zabbix_api.create_hostgroup(project)
-
-            groupids = [openstack_group_id, project_group_id]
-
-            if zabbix_api.get_host_id(domain) is None:
-                logger.info("Creating new instance: %s", domain)
-                zabbix_api.create_host(
-                    domain, groupids, templateid, PSK_IDENTITY, PSK)
-
-            metrics = get_instance_metrics(domain, libvirt_connection)
-            zabbix_sender.send(metrics)
-            logger.info("Domain %s is updated", domain)
-
-        except DomainNotFoundError as error:
-            # This may happen if a domain is deleted after we discover
-            # it. In that case we log the error and move on.
-            logger.error("Domain %s not found", domain)
+            libvirt_connection = LibvirtConnection(uri)
+        except LibvirtConnectionError as error:
+            # Log the failure to connect to a host, but continue processing
+            # other hosts.
+            print("Host %s errored out", host)
             logger.exception(error)
-        except ZabbixAPIException as error:
-            logger.error("Zabbix API error")
-            logger.exception(error)
-            raise
+            return
+
+        domains = libvirt_connection.discover_domains()
+        for domain in domains:
+            try:
+                project = libvirt_connection.get_misc_attributes(domain)[
+                    "project_uuid"]
+                project_group_id = zabbix_api.get_group_id(project)
+
+                if project_group_id is None:
+                    project_group_id = zabbix_api.create_hostgroup(project)
+
+                groupids = [openstack_group_id, project_group_id]
+
+                if zabbix_api.get_host_id(domain) is None:
+                    logger.info("Creating new instance: %s", domain)
+                    zabbix_api.create_host(
+                        domain, groupids, templateid, PSK_IDENTITY, PSK)
+
+                metrics = get_instance_metrics(domain, libvirt_connection)
+                zabbix_sender.send(metrics)
+                logger.info("Domain %s is updated", domain)
+
+            except DomainNotFoundError as error:
+                # This may happen if a domain is deleted after we discover
+                # it. In that case we log the error and move on.
+                logger.error("Domain %s not found", domain)
+                logger.exception(error)
+            except ZabbixAPIException as error:
+                logger.error("Zabbix API error")
+                logger.exception(error)
+                raise
     return domains
 
 
@@ -151,6 +156,7 @@ def main():
     host_list = get_hosts(HOSTS_FILE)
 
     all_openstack_instances = []
+    p = Pool(processes=len(host_list))
 
     custom_wrapper = functools.partial(
         PyZabbixPSKSocketWrapper, identity=PSK_IDENTITY, psk=bytes(bytearray.fromhex(PSK)))
@@ -160,11 +166,12 @@ def main():
     with ZabbixConnection(USER, "https://" + ZABBIX_SERVER, PASSWORD) as zapi:
         openstack_group_id = zapi.get_group_id(GROUP_NAME)
         custom_process_host = functools.partial(
-            process_host, zabbix_api=zapi, zabbix_sender=zabbix_sender)
+            process_host, zabbix_sender=zabbix_sender)
 
-        for host in host_list:
-            domains = custom_process_host(host)
-            all_openstack_instances.extend(domains)
+        results = p.map(custom_process_host, host_list)
+
+        for result in results:
+            all_openstack_instances.extend(result)
 
         all_zabbix_hosts = zapi.get_all_hosts([openstack_group_id])
         hosts_not_in_openstack = list(
