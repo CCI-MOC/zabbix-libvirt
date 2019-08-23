@@ -115,7 +115,7 @@ def process_host(host, zabbix_sender):
     return domains
 
 
-def cleanup_hosts(hosts, zabbix_api):
+def cleanup_host(host):
     """
     This function takes care of hosts that are in zabbix but no longer exist
     in openstack.
@@ -123,32 +123,28 @@ def cleanup_hosts(hosts, zabbix_api):
     """
 
     # This can be any arbritary item that we know exists and is generally updated.
+    print("Cleanup Host: " + host)
     item_key = "libvirt.instance[name]"
     retention_period = 90 * 24 * 60 * 60
-    hosts_to_be_deleted = []
 
-    for host in hosts:
-
+    with ZabbixConnection(USER, "https://" + ZABBIX_SERVER, PASSWORD) as zabbix_api:
         host_id = zabbix_api.get_host_id(host)
         assert host_id is not None, "Host ID is none for: " + host
-
         lastclock = zabbix_api.get_item(host_id, item_key, "lastclock")
 
-        if lastclock is None:
-            main_logger.warning("Host '%s' has no lastclock", host)
-            continue
+    if lastclock is None:
+        main_logger.warning("Host '%s' has no lastclock", host)
+        return None
 
-        if int(lastclock) == 0:
-            main_logger.info("Last clock for host '%s is zero", host)
-            continue
+    if int(lastclock) == 0:
+        main_logger.info("Last clock for host '%s is zero", host)
+        return None
 
+    if int(time.time()) - int(lastclock) > retention_period:
+        main_logger.info("Staging host  '%s' to be deleted", host)
+        return host_id
 
-        if int(time.time()) - int(lastclock) > retention_period:
-            main_logger.info("Staging host  '%s' to be deleted", host)
-            hosts_to_be_deleted.append(host_id)
-
-    if hosts_to_be_deleted != []:
-        zabbix_api.delete_hosts(hosts_to_be_deleted)
+    return None
 
 
 def main():
@@ -156,28 +152,36 @@ def main():
     host_list = get_hosts(HOSTS_FILE)
 
     all_openstack_instances = []
-    p = Pool(processes=len(host_list))
+    p = Pool(min(MAX_PROCESSES, len(host_list)))
 
     custom_wrapper = functools.partial(
         PyZabbixPSKSocketWrapper, identity=PSK_IDENTITY, psk=bytes(bytearray.fromhex(PSK)))
     zabbix_sender = ZabbixSender(
         zabbix_server=ZABBIX_SERVER, socket_wrapper=custom_wrapper, timeout=30)
 
+    custom_process_host = functools.partial(
+        process_host, zabbix_sender=zabbix_sender)
+
+    results = filter(None, p.map(custom_process_host, host_list))
+
+    for result in results:
+        all_openstack_instances.extend(result)
+
     with ZabbixConnection(USER, "https://" + ZABBIX_SERVER, PASSWORD) as zapi:
         openstack_group_id = zapi.get_group_id(GROUP_NAME)
-        custom_process_host = functools.partial(
-            process_host, zabbix_sender=zabbix_sender)
-
-        results = p.map(custom_process_host, host_list)
-
-        for result in results:
-            all_openstack_instances.extend(result)
-
         all_zabbix_hosts = zapi.get_all_hosts([openstack_group_id])
+
         hosts_not_in_openstack = list(
             set(all_zabbix_hosts) - set(all_openstack_instances))
 
-        cleanup_hosts(hosts_not_in_openstack, zapi)
+        hosts_to_be_deleted = []
+
+        p = Pool(min(MAX_PROCESSES, len(hosts_not_in_openstack)))
+
+        hosts_to_be_deleted = filter(None, p.map(
+            cleanup_host, hosts_not_in_openstack))
+        if hosts_to_be_deleted != []:
+            zapi.delete_hosts(hosts_to_be_deleted)
 
 
 if __name__ == "__main__":
@@ -192,5 +196,6 @@ if __name__ == "__main__":
     KEY_FILE = config['general']['KEY_FILE']
     GROUP_NAME = "openstack-instances"
     TEMPLATE_NAME = "moc_libvirt_single"
+    MAX_PROCESSES = 16
     main_logger = setup_logging(__name__, LOG_DIR + "/main.log")
     main()
