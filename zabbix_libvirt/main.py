@@ -56,8 +56,6 @@ def get_instance_metrics(domain_uuid_string, libvirt_connection):
     _create_metric(libvirt_connection.get_cpu(domain_uuid_string), "cpu")
     _create_metric(libvirt_connection.get_misc_attributes(
         domain_uuid_string), "instance")
-    from pprint import pprint
-    pprint(metrics)
     return metrics
 
 
@@ -134,6 +132,11 @@ def cleanup_hosts(hosts, zabbix_api):
         if lastclock is None:
             main_logger.warning("Host '%s' has no lastclock", host)
             continue
+
+        if int(lastclock) == 0:
+            main_logger.info("Last clock for host '%s is zero", host)
+            continue
+
 
         if int(time.time()) - int(lastclock) > retention_period:
             main_logger.info("Staging host  '%s' to be deleted", host)
