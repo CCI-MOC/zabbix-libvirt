@@ -17,20 +17,19 @@ VNICS_KEY = "libvirt.nic.discover"
 VDISKS_KEY = "libvirt.disk.discover"
 
 
-def update_instance(domain_uuid_string, libvirt_connection, zabbix_sender):
+def get_instance_metrics(domain_uuid_string, libvirt_connection):
     """Gather instance attributes for domain with `domain_uuid_string` using
     `libvirt_connection` and then send the zabbix metrics using `zabbix_sender`
     """
     # 1. Discover nics and disks, and send the discovery packet
+    metrics = []
     vnics = libvirt_connection.discover_vnics(domain_uuid_string)
     vdisks = libvirt_connection.discover_vdisks(domain_uuid_string)
 
-    zabbix_sender.send([ZabbixMetric(domain_uuid_string, VNICS_KEY,
-                                     json.dumps(vnics))])
-    zabbix_sender.send([ZabbixMetric(domain_uuid_string, VDISKS_KEY,
-                                     json.dumps(vdisks))])
-
-    metrics = []
+    metrics.append(ZabbixMetric(domain_uuid_string, VNICS_KEY,
+                                json.dumps(vnics)))
+    metrics.append(ZabbixMetric(domain_uuid_string, VDISKS_KEY,
+                                json.dumps(vdisks)))
 
     def _create_metric(stats, item_type, item_subtype=None):
         """Helper function to create and append to the metrics list"""
@@ -57,8 +56,60 @@ def update_instance(domain_uuid_string, libvirt_connection, zabbix_sender):
     _create_metric(libvirt_connection.get_cpu(domain_uuid_string), "cpu")
     _create_metric(libvirt_connection.get_misc_attributes(
         domain_uuid_string), "instance")
-    zabbix_sender.send(metrics)
-    logger.info("Domain %s is updated", domain_uuid_string)
+    from pprint import pprint
+    pprint(metrics)
+    return metrics
+
+
+def process_host(host, zabbix_api, zabbix_sender):
+    """Takes in host, and then process the domains on that host"""
+    logger = setup_logging(__name__ + host, LOG_DIR + "/" + host)
+
+    openstack_group_id = zabbix_api.get_group_id(GROUP_NAME)
+    templateid = zabbix_api.get_template_id(TEMPLATE_NAME)
+
+    logger.info("Starting to process host: %s", host)
+    uri = "qemu+ssh://root@" + host + "/system?keyfile=" + KEY_FILE
+
+    try:
+        libvirt_connection = LibvirtConnection(uri)
+    except LibvirtConnectionError as error:
+        # Log the failure to connect to a host, but continue processing
+        # other hosts.
+        logger.exception(error)
+        return
+
+    domains = libvirt_connection.discover_domains()
+    for domain in domains:
+        try:
+            project = libvirt_connection.get_misc_attributes(domain)[
+                "project_uuid"]
+            project_group_id = zabbix_api.get_group_id(project)
+
+            if project_group_id is None:
+                project_group_id = zabbix_api.create_hostgroup(project)
+
+            groupids = [openstack_group_id, project_group_id]
+
+            if zabbix_api.get_host_id(domain) is None:
+                logger.info("Creating new instance: %s", domain)
+                zabbix_api.create_host(
+                    domain, groupids, templateid, PSK_IDENTITY, PSK)
+
+            metrics = get_instance_metrics(domain, libvirt_connection)
+            zabbix_sender.send(metrics)
+            logger.info("Domain %s is updated", domain)
+
+        except DomainNotFoundError as error:
+            # This may happen if a domain is deleted after we discover
+            # it. In that case we log the error and move on.
+            logger.error("Domain %s not found", domain)
+            logger.exception(error)
+        except ZabbixAPIException as error:
+            logger.error("Zabbix API error")
+            logger.exception(error)
+            raise
+    return domains
 
 
 def cleanup_hosts(hosts, zabbix_api):
@@ -81,11 +132,11 @@ def cleanup_hosts(hosts, zabbix_api):
         lastclock = zabbix_api.get_item(host_id, item_key, "lastclock")
 
         if lastclock is None:
-            logger.warning("Host '%s' has no lastclock", host)
+            main_logger.warning("Host '%s' has no lastclock", host)
             continue
 
         if int(time.time()) - int(lastclock) > retention_period:
-            logger.info("Staging host  '%s' to be deleted", host)
+            main_logger.info("Staging host  '%s' to be deleted", host)
             hosts_to_be_deleted.append(host_id)
 
     if hosts_to_be_deleted != []:
@@ -96,60 +147,21 @@ def main():
     """main I guess"""
     host_list = get_hosts(HOSTS_FILE)
 
+    all_openstack_instances = []
+
     custom_wrapper = functools.partial(
         PyZabbixPSKSocketWrapper, identity=PSK_IDENTITY, psk=bytes(bytearray.fromhex(PSK)))
     zabbix_sender = ZabbixSender(
         zabbix_server=ZABBIX_SERVER, socket_wrapper=custom_wrapper, timeout=30)
 
-    all_openstack_instances = []
-
     with ZabbixConnection(USER, "https://" + ZABBIX_SERVER, PASSWORD) as zapi:
-
         openstack_group_id = zapi.get_group_id(GROUP_NAME)
-        templateid = zapi.get_template_id(TEMPLATE_NAME)
+        custom_process_host = functools.partial(
+            process_host, zabbix_api=zapi, zabbix_sender=zabbix_sender)
 
         for host in host_list:
-            logger.info("Starting to process host: %s", host)
-            uri = "qemu+ssh://root@" + host + "/system?keyfile=" + KEY_FILE
-
-            try:
-                libvirt_connection = LibvirtConnection(uri)
-            except LibvirtConnectionError as error:
-                # Log the failure to connect to a host, but continue processing
-                # other hosts.
-                logger.exception(error)
-                continue
-
-            domains = libvirt_connection.discover_domains()
+            domains = custom_process_host(host)
             all_openstack_instances.extend(domains)
-
-            for domain in domains:
-
-                try:
-                    project = libvirt_connection.get_misc_attributes(domain)[
-                        "project_uuid"]
-                    project_group_id = zapi.get_group_id(project)
-
-                    if project_group_id is None:
-                        project_group_id = zapi.create_hostgroup(project)
-
-                    groupids = [openstack_group_id, project_group_id]
-
-                    if zapi.get_host_id(domain) is None:
-                        logger.info("Creating new instance: %s", domain)
-                        zapi.create_host(
-                            domain, groupids, templateid, PSK_IDENTITY, PSK)
-
-                    update_instance(domain, libvirt_connection, zabbix_sender)
-                except DomainNotFoundError as error:
-                    # This may happen if a domain is deleted after we discover
-                    # it. In that case we log the error and move on.
-                    logger.error("Domain %s not found", domain)
-                    logger.exception(error)
-                except ZabbixAPIException as error:
-                    logger.error("Zabbix API error")
-                    logger.exception(error)
-                    raise
 
         all_zabbix_hosts = zapi.get_all_hosts([openstack_group_id])
         hosts_not_in_openstack = list(
@@ -163,12 +175,12 @@ if __name__ == "__main__":
     USER = config['general']['API_USER']
     PASSWORD = config['general']['PASSWORD']
     ZABBIX_SERVER = config['general']['ZABBIX_SERVER']
-    LOG_FILE = config['general']['LOG_DIR'] + "zabbix-libvirt.log"
+    LOG_DIR = config['general']['LOG_DIR']
     PSK = config['general']['PSK']
     PSK_IDENTITY = config['general']['PSK_IDENTITY']
     HOSTS_FILE = config['general']['HOSTS_FILE']
     KEY_FILE = config['general']['KEY_FILE']
     GROUP_NAME = "openstack-instances"
     TEMPLATE_NAME = "moc_libvirt_single"
-    logger = setup_logging(__name__, LOG_FILE)
+    main_logger = setup_logging(__name__, LOG_DIR + "/main.log")
     main()
