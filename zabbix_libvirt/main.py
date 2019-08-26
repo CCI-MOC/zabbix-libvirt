@@ -32,6 +32,9 @@ def get_instance_metrics(domain_uuid_string, libvirt_connection):
     metrics.append(ZabbixMetric(domain_uuid_string, VDISKS_KEY,
                                 json.dumps(vdisks)))
 
+    cpu_stats = libvirt_connection.get_cpu(domain_uuid_string)
+    timestamp = cpu_stats.pop("timestamp")
+
     def _create_metric(stats, item_type, item_subtype=None):
         """Helper function to create and append to the metrics list"""
         for stat, value in stats.iteritems():
@@ -40,7 +43,13 @@ def get_instance_metrics(domain_uuid_string, libvirt_connection):
                 stat = "{},{}".format(item_subtype, stat)
 
             key = "libvirt.{}[{}]".format(item_type, stat)
-            metrics.append(ZabbixMetric(domain_uuid_string, key, value))
+            metrics.append(ZabbixMetric(
+                domain_uuid_string, key, value, timestamp))
+
+    _create_metric(cpu_stats, "cpu")
+    _create_metric(libvirt_connection.get_memory(domain_uuid_string), "memory")
+    _create_metric(libvirt_connection.get_misc_attributes(
+        domain_uuid_string), "instance")
 
     for vdisk in vdisks:
         stats = libvirt_connection.get_diskio(
@@ -53,10 +62,6 @@ def get_instance_metrics(domain_uuid_string, libvirt_connection):
             domain_uuid_string, vnic["{#VNIC}"])
         _create_metric(stats, "nic", vnic["{#VNIC}"])
 
-    _create_metric(libvirt_connection.get_memory(domain_uuid_string), "memory")
-    _create_metric(libvirt_connection.get_cpu(domain_uuid_string), "cpu")
-    _create_metric(libvirt_connection.get_misc_attributes(
-        domain_uuid_string), "instance")
     return metrics
 
 
