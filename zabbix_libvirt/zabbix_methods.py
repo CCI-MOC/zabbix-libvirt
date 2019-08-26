@@ -46,15 +46,15 @@ class ZabbixConnection(object):
 
     def get_all_hosts(self, groupids=None):
         """
-        Find all monitored hosts.
+        Find all hosts.
 
         groupdis: Return only hosts that belong to the given groups. This means
-        group belonging to either of the group ids in the list (a union).
+        host belonging to either of the group ids in the list (a union).
         """
         if groupids is None:
-            parameters = {"monitored_hosts": 1}
+            parameters = {"output": ["name"]}
         else:
-            parameters = {"groupids": groupids, "monitored_hosts": 1}
+            parameters = {"groupids": groupids, "output": ["name"]}
         results = self.session.do_request(
             "host.get", parameters)["result"]
         return [result["name"] for result in results]
@@ -83,6 +83,23 @@ class ZabbixConnection(object):
             return None
         return results[0]["hostid"]
 
+    def get_host_status(self, host_name):
+        """Return the montoring status for a host.
+        It's weird, but status "0" represents that host is monitored(enabled),
+        while "1" represents that host is not montitored (disabled)"""
+        results = self.session.do_request(
+            "host.get", {"filter": {"host": [host_name]},
+                         "output": ["status", "name"]})["result"]
+        if results == []:
+            return None
+        return results[0]["status"]
+
+    def set_hosts_status(self, hostids, status):
+        """Set monitoring statuses of mulitple hosts"""
+        hosts = [{"hostid": hostid} for hostid in hostids]
+        self.session.do_request(
+            "host.massupdate", {"hosts": hosts, "status": status})
+
     def get_item(self, host_id, item_key, item_attribute="lastvalue"):
         """Get the value of an item with item_key on host with host_id.
 
@@ -94,6 +111,22 @@ class ZabbixConnection(object):
             if result["key_"] == item_key:
                 return result.get(item_attribute)
         return None
+
+    def get_history(self, host_id, item_key, item_type=3, item_attribute="value"):
+        """Return item history
+
+        Sort fields by clock in descending order to get the latest items first.
+        """
+        itemids = self.get_item(host_id, item_key, item_attribute="itemid")
+        results = self.session.do_request("history.get", {
+            "history": item_type,
+            "itemids": itemids,
+            "limit": 1,
+            "sortfield": "clock",
+            "sortorder": "DESC"})["result"]
+        if results == []:
+            return None
+        return results[0][item_attribute]
 
     def delete_hosts(self, host_ids):
         """Delete a host in zabbix"""

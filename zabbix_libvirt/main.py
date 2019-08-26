@@ -17,6 +17,10 @@ from libvirt_checks import LibvirtConnection
 VNICS_KEY = "libvirt.nic.discover"
 VDISKS_KEY = "libvirt.disk.discover"
 
+ENABLE_HOST = "0"
+DISABLE_HOST = "1"
+CHARACTER = "1"
+
 
 def get_instance_metrics(domain_uuid_string, libvirt_connection):
     """Gather instance attributes for domain with `domain_uuid_string` using
@@ -85,7 +89,7 @@ def process_host(host, zabbix_sender):
             # other hosts.
             print("Host %s errored out", host)
             logger.exception(error)
-            return
+            return None
 
         domains = libvirt_connection.discover_domains()
         for domain in domains:
@@ -103,6 +107,9 @@ def process_host(host, zabbix_sender):
                     logger.info("Creating new instance: %s", domain)
                     zabbix_api.create_host(
                         domain, groupids, templateid, PSK_IDENTITY, PSK)
+                elif zabbix_api.get_host_status(domain) == DISABLE_HOST:
+                    host_id = zabbix_api.get_host_id(domain)
+                    zabbix_api.set_hosts_status([host_id], ENABLE_HOST)
 
                 metrics = get_instance_metrics(domain, libvirt_connection)
                 zabbix_sender.send(metrics)
@@ -128,28 +135,28 @@ def cleanup_host(host):
     """
 
     # This can be any arbritary item that we know exists and is generally updated.
-    print("Cleanup Host: " + host)
     item_key = "libvirt.instance[name]"
     retention_period = 90 * 24 * 60 * 60
 
     with ZabbixConnection(USER, "https://" + ZABBIX_SERVER, PASSWORD) as zabbix_api:
         host_id = zabbix_api.get_host_id(host)
         assert host_id is not None, "Host ID is none for: " + host
-        lastclock = zabbix_api.get_item(host_id, item_key, "lastclock")
+        lastclock = zabbix_api.get_history(
+            host_id, item_key, item_type=CHARACTER, item_attribute="clock")
+        ret = {"host_id": host_id, "action": "disable"}
 
     if lastclock is None:
         main_logger.warning("Host '%s' has no lastclock", host)
-        return None
-
-    if int(lastclock) == 0:
-        main_logger.info("Last clock for host '%s is zero", host)
-        return None
+        return ret
 
     if int(time.time()) - int(lastclock) > retention_period:
         main_logger.info("Staging host  '%s' to be deleted", host)
-        return host_id
+        return {"host_id": host_id, "action": "delete"}
+    elif int(time.time()) - int(lastclock) > 60 * 60:
+        # Disable instance if not detected for an hour
+        return ret
 
-    return None
+    return ret
 
 
 def main():
@@ -179,14 +186,20 @@ def main():
         hosts_not_in_openstack = list(
             set(all_zabbix_hosts) - set(all_openstack_instances))
 
-        hosts_to_be_deleted = []
-
         p = Pool(min(MAX_PROCESSES, len(hosts_not_in_openstack)))
 
-        hosts_to_be_deleted = filter(None, p.map(
-            cleanup_host, hosts_not_in_openstack))
+        results = filter(None, p.map(cleanup_host, hosts_not_in_openstack))
+        hosts_to_be_deleted = [result["host_id"]
+                               for result in results if result["action"] == "delete"]
+        hosts_to_be_disabled = [result["host_id"]
+                                for result in results if result["action"] == "disable"]
+        if hosts_to_be_disabled != []:
+            zapi.set_hosts_status(hosts_to_be_disabled, DISABLE_HOST)
         if hosts_to_be_deleted != []:
             zapi.delete_hosts(hosts_to_be_deleted)
+        print("Hosts not in openstack:" + str(len(hosts_not_in_openstack)))
+        print("hosts_to_be_disabled:" + str(len(hosts_to_be_disabled)))
+        print("hosts_to_be_deleted:" + str(len(hosts_to_be_deleted)))
 
 
 if __name__ == "__main__":
