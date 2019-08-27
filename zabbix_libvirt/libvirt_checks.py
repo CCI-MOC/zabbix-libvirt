@@ -140,7 +140,7 @@ class LibvirtConnection(object):
         info = domain.info()
         timestamp = time.time()
 
-        return {"cpu_time": info[4],
+        return {"cpu_time": int(info[4]/info[3]),
                 "core_count": info[3],
                 "timestamp": timestamp}
 
