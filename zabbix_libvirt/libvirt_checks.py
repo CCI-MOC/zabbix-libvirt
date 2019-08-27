@@ -9,9 +9,6 @@ import libvirt
 from errors import LibvirtConnectionError, DomainNotFoundError
 
 
-SLEEP_TIME = 1
-
-
 class LibvirtConnection(object):
     """This class opens a connection to libvirt and provides with methods
     to get useuful information about domains.
@@ -24,7 +21,10 @@ class LibvirtConnection(object):
 
     def __init__(self, uri=None):
         """Creates a read only connection to libvirt"""
-        self.conn = libvirt.openReadOnly(uri)
+        try:
+            self.conn = libvirt.openReadOnly(uri)
+        except libvirt.libvirtError as error:
+            raise LibvirtConnectionError(error)
         if self.conn is None:
             raise LibvirtConnectionError(
                 "Failed to open connection to the hypervisor: " + str(uri))
@@ -39,7 +39,7 @@ class LibvirtConnection(object):
         """Find the domain by uuid and return domain object"""
         try:
             domain = self.conn.lookupByUUIDString(domain_uuid_string)
-        except libvirt.libvirtError as e:
+        except libvirt.libvirtError:
             raise DomainNotFoundError(
                 "Failed to find domain: " + domain_uuid_string)
         return domain
@@ -47,39 +47,43 @@ class LibvirtConnection(object):
     def discover_domains(self):
         """Return all domains"""
         domains = self.conn.listAllDomains()
-        domains = [{"{#DOMAINNAME}": domain.name(), "{#DOMAINUUID}": domain.UUIDString()}
-                   for domain in domains]
-        return domains
+        return [domain.UUIDString() for domain in domains]
 
-    def discover_all_vnics(self):
-        """Discover all vnics for all domains.
+    def _get_domain_xmldump(self, domain_uuid_string):
+        """Return domain xml dump"""
+        domain = self._get_domain_by_uuid(domain_uuid_string)
+        return ElementTree.fromstring(domain.XMLDesc())
 
-        Returns a list of dictionary with vnics name and associated domain's uuid"""
-        domains = self.conn.listAllDomains()
+    def _get_instance_attributes(self, domain_uuid_string):
+        """Returns openstack specific instance attributes"""
+        tree = self._get_domain_xmldump(domain_uuid_string)
 
-        vnics = []
-        for domain in domains:
-            tree = ElementTree.fromstring(domain.XMLDesc())
-            elements = tree.findall('devices/interface/target')
-            vnics.extend([{"{#VNIC}": element.get(
-                'dev'), "{#DOMAINUUID}": domain.UUIDString()} for element in elements])
+        namespaces = {"nova": "http://openstack.org/xmlns/libvirt/nova/1.0"}
+        element = tree.find("metadata/nova:instance/nova:owner", namespaces)
 
-        return vnics
+        if element is None:
+            return "non-openstack-instance", "non-openstack-instance"
 
-    def discover_all_vdisks(self):
-        """Discover all virtual disk drives.
+        user_uuid = element.find("nova:user", namespaces).get("uuid")
+        project_uuid = element.find("nova:project", namespaces).get("uuid")
 
-        Returns a list of dictionary with vdisks name and associated domain's uuid"""
-        domains = self.conn.listAllDomains()
+        return user_uuid, project_uuid
 
-        vdisks = []
-        for domain in domains:
-            tree = ElementTree.fromstring(domain.XMLDesc())
-            elements = tree.findall('devices/disk/target')
-            vdisks = [{"{#VDISK}": element.get(
-                'dev'), "{#DOMAINUUID}": domain.UUIDString()} for element in elements]
+    def discover_vnics(self, domain_uuid_string):
+        """Discover all virtual NICs on a domain.
 
-        return vdisks
+        Returns a list of dictionary with "{#VNIC}"s name and domain's uuid"""
+        tree = self._get_domain_xmldump(domain_uuid_string)
+        elements = tree.findall('devices/interface/target')
+        return [{"{#VNIC}": element.get('dev')} for element in elements]
+
+    def discover_vdisks(self, domain_uuid_string):
+        """Discover all virtual disk drives on a domain.
+
+        Returns a list of dictionary with "{#VDISK}"s name and domain's uuid"""
+        tree = self._get_domain_xmldump(domain_uuid_string)
+        elements = tree.findall('devices/disk/target')
+        return [{"{#VDISK}": element.get('dev')} for element in elements]
 
     def get_memory(self, domain_uuid_string):
         """Get memorystats for domain.
@@ -110,37 +114,35 @@ class LibvirtConnection(object):
                 "available": stats.get("usable", 0) * 1024,
                 "current_allocation": stats.get("actual", 0) * 1024}
 
-    def get_virt_host(self):
+    def get_misc_attributes(self, domain_uuid_string):
         """Get virtualization host's hostname"""
-        return self.conn.getHostname()
+        domain = self._get_domain_by_uuid(domain_uuid_string)
+        user_uuid, project_uuid = self._get_instance_attributes(
+            domain_uuid_string)
+
+        return {"virt_host": self.conn.getHostname(),
+                "name": domain.name(),
+                "user_uuid": user_uuid,
+                "project_uuid": project_uuid,
+                "active": self.is_active(domain_uuid_string)}
 
     def get_cpu(self, domain_uuid_string):
         """Get CPU statistics. Libvirt returns the stats in nanoseconds.
 
-        Returns the overall percent usage.
+        Returns the cpu time in nanoseconds.
+        Caller has to do the math to calculate percentage utilization.
+
+        See the stack overflow article to understand what it means.
+        https://stackoverflow.com/questions/40468370/what-does-cpu-time-represent-exactly-in-libvirt
         """
         domain = self._get_domain_by_uuid(domain_uuid_string)
 
-        try:
-            stats_1 = domain.getCPUStats(True)[0]
-            time.sleep(SLEEP_TIME)
-            stats_2 = domain.getCPUStats(True)[0]
-        except libvirt.libvirtError:
-            # If the domain is not running, then the cpu usage is 0.
-            # If the error is due to other reasons, then re-raise the error.
-            if domain.isActive():
-                raise
-            else:
-                return {"cpu_time": 0, "system_time": 0, "user_time": 0}
+        info = domain.info()
+        timestamp = time.time()
 
-        number_of_cpus = domain.info()[3]
-
-        def _percent_usage(time1, time2):
-            return (time2 - time1) / (number_of_cpus * SLEEP_TIME * 10**7)
-
-        return {"cpu_time": _percent_usage(stats_1['cpu_time'], stats_2['cpu_time']),
-                "system_time": _percent_usage(stats_1['system_time'], stats_2['system_time']),
-                "user_time": _percent_usage(stats_1['user_time'], stats_2['user_time'])}
+        return {"cpu_time": int(info[4]/info[3]),
+                "core_count": info[3],
+                "timestamp": timestamp}
 
     def get_ifaceio(self, domain_uuid_string, iface):
         """Get Network I / O"""
