@@ -9,7 +9,7 @@ class ZabbixConnection(object):
     """
 
     def __init__(self, user, server, password):
-        """Initialize this bad boy"""
+        """Login so we have a session"""
         self.session = self.login(user, server, password)
 
     def __enter__(self):

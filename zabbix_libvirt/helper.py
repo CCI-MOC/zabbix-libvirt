@@ -7,7 +7,7 @@ config = configparser.ConfigParser()
 
 
 def get_hosts(hosts_file):
-    """Read the ips/dns names from a file and return those bad boys"""
+    """Return the IPs/DNS names from a file"""
 
     with open(hosts_file) as hostfile:
         data = hostfile.read()
