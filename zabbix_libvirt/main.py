@@ -4,6 +4,8 @@
 import json
 import functools
 import time
+import sys
+import os
 from multiprocessing import Pool
 
 from pyzabbix import ZabbixMetric, ZabbixSender
@@ -13,7 +15,7 @@ from errors import LibvirtConnectionError, DomainNotFoundError
 from helper import config, load_config, get_hosts, setup_logging
 from zabbix_methods import ZabbixConnection
 from libvirt_checks import LibvirtConnection
-
+from datetime import datetime
 VNICS_KEY = "libvirt.nic.discover"
 VDISKS_KEY = "libvirt.disk.discover"
 
@@ -71,7 +73,7 @@ def get_instance_metrics(domain_uuid_string, libvirt_connection):
 
 def process_host(host, zabbix_sender):
     """Takes in host, and then process the domains on that host"""
-    print("Processing Host: %s", host)
+    print("Processing Host: " + host)
     logger = setup_logging(__name__ + host, LOG_DIR + "/" + host)
 
     with ZabbixConnection(USER, "https://" + ZABBIX_SERVER, PASSWORD) as zabbix_api:
@@ -124,6 +126,7 @@ def process_host(host, zabbix_sender):
                 logger.error("Zabbix API error")
                 logger.exception(error)
                 raise
+    print("Finished Processing: " + host)
     return domains
 
 
@@ -137,26 +140,26 @@ def cleanup_host(host):
     # This can be any arbritary item that we know exists and is generally updated.
     item_key = "libvirt.instance[name]"
     retention_period = 90 * 24 * 60 * 60
+    print("Deciding what to do with: " + host)
 
     with ZabbixConnection(USER, "https://" + ZABBIX_SERVER, PASSWORD) as zabbix_api:
         host_id = zabbix_api.get_host_id(host)
         assert host_id is not None, "Host ID is none for: " + host
         lastclock = zabbix_api.get_history(
             host_id, item_key, item_type=CHARACTER, item_attribute="clock")
-        ret = {"host_id": host_id, "action": "disable"}
 
     if lastclock is None:
         main_logger.warning("Host '%s' has no lastclock", host)
-        return ret
+        return {"host_id": host_id, "action": "disable"}
 
     if int(time.time()) - int(lastclock) > retention_period:
         main_logger.info("Staging host  '%s' to be deleted", host)
         return {"host_id": host_id, "action": "delete"}
     elif int(time.time()) - int(lastclock) > 60 * 60:
         # Disable instance if not detected for an hour
-        return ret
+        return {"host_id": host_id, "action": "disable"}
 
-    return ret
+    return {"host_id": host_id, "action": "disable"}
 
 
 def main():
@@ -175,6 +178,7 @@ def main():
         process_host, zabbix_sender=zabbix_sender)
 
     results = filter(None, p.map(custom_process_host, host_list))
+    print("Processed all host")
 
     for result in results:
         all_openstack_instances.extend(result)
@@ -188,18 +192,38 @@ def main():
 
         p = Pool(min(MAX_PROCESSES, len(hosts_not_in_openstack)))
 
-        results = filter(None, p.map(cleanup_host, hosts_not_in_openstack))
-        hosts_to_be_deleted = [result["host_id"]
-                               for result in results if result["action"] == "delete"]
-        hosts_to_be_disabled = [result["host_id"]
-                                for result in results if result["action"] == "disable"]
-        if hosts_to_be_disabled != []:
-            zapi.set_hosts_status(hosts_to_be_disabled, DISABLE_HOST)
-        if hosts_to_be_deleted != []:
-            zapi.delete_hosts(hosts_to_be_deleted)
-        print("Hosts not in openstack:" + str(len(hosts_not_in_openstack)))
-        print("hosts_to_be_disabled:" + str(len(hosts_to_be_disabled)))
-        print("hosts_to_be_deleted:" + str(len(hosts_to_be_deleted)))
+        lockfile = "/tmp/openstack-monitoring.lockfile"
+
+        if os.path.exists(lockfile):
+            main_logger.info("lockfile exists, quitting")
+            sys.exit(0)
+
+        # only execute once/twice every hour.
+        if not (10 < datetime.now().minute < 17):
+            main_logger.info("not the right time to cleanup, quitting")
+            sys.exit(0)
+
+        open(lockfile, "w").close()
+
+        try:
+            main_logger.info("Starting cleanup tasks")
+            results = filter(None, p.map(cleanup_host, hosts_not_in_openstack))
+            print("Clean up processes finished")
+            # FIXME: the list comprehensions are really slow, since we
+            # iterate over a lot of items.
+            hosts_to_be_deleted = [result["host_id"]
+                                   for result in results if result["action"] == "delete"]
+            hosts_to_be_disabled = [result["host_id"]
+                                    for result in results if result["action"] == "disable"]
+            if hosts_to_be_disabled != []:
+                zapi.set_hosts_status(hosts_to_be_disabled, DISABLE_HOST)
+            if hosts_to_be_deleted != []:
+                zapi.delete_hosts(hosts_to_be_deleted)
+            print("Hosts not in openstack:" + str(len(hosts_not_in_openstack)))
+            print("hosts_disabled:" + str(len(hosts_to_be_disabled)))
+            print("hosts_deleted:" + str(len(hosts_to_be_deleted)))
+        finally:
+            os.remove(lockfile)
 
 
 if __name__ == "__main__":
@@ -214,6 +238,6 @@ if __name__ == "__main__":
     KEY_FILE = config['general']['KEY_FILE']
     GROUP_NAME = "openstack-instances"
     TEMPLATE_NAME = "moc_libvirt_single"
-    MAX_PROCESSES = 16
+    MAX_PROCESSES = 64
     main_logger = setup_logging(__name__, LOG_DIR + "/main.log")
     main()
