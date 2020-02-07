@@ -1,6 +1,6 @@
 # zabbix-libvirt
 
-This repository contains a set of scripts to monitor Virtual Machines on hosts using the libvirt API. It is still a work in progress.
+This repository contains a set of scripts to monitor Virtual Machines on hosts using the libvirt API. It is still a work in progress and will probably not scale very well for large clusters.
 
 We developed this to monitor our openstack cluster.
 
