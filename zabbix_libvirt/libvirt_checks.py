@@ -62,12 +62,20 @@ class LibvirtConnection(object):
         element = tree.find("metadata/nova:instance/nova:owner", namespaces)
 
         if element is None:
-            return "non-openstack-instance", "non-openstack-instance"
+            return {"user_uuid": "non-openstack-instance",
+                    "project_uuid": "non-openstack-instance",
+                    "user_name": "non-openstack-instance",
+                    "project_name": "non-openstack-instance"}
 
         user_uuid = element.find("nova:user", namespaces).get("uuid")
         project_uuid = element.find("nova:project", namespaces).get("uuid")
+        user_name = element.find("nova:user", namespaces).text
+        project_name = element.find("nova:project", namespaces).text
 
-        return user_uuid, project_uuid
+        return {"user_uuid": user_uuid,
+                "project_uuid": project_uuid,
+                "user_name": user_name,
+                "project_name": project_name}
 
     def discover_vnics(self, domain_uuid_string):
         """Discover all virtual NICs on a domain.
@@ -115,16 +123,17 @@ class LibvirtConnection(object):
                 "current_allocation": stats.get("actual", 0) * 1024}
 
     def get_misc_attributes(self, domain_uuid_string):
-        """Get virtualization host's hostname"""
-        domain = self._get_domain_by_uuid(domain_uuid_string)
-        user_uuid, project_uuid = self._get_instance_attributes(
-            domain_uuid_string)
+        """Get virtualization host's hostname and combine it with openstack
+        specific instance attributes"""
 
-        return {"virt_host": self.conn.getHostname(),
-                "name": domain.name(),
-                "user_uuid": user_uuid,
-                "project_uuid": project_uuid,
-                "active": self.is_active(domain_uuid_string)}
+        domain = self._get_domain_by_uuid(domain_uuid_string)
+        instance_attributes = self._get_instance_attributes(domain_uuid_string)
+
+        instance_attributes["virt_host"] = self.conn.getHostname()
+        instance_attributes["name"] = domain.name()
+        instance_attributes["active"] = self.is_active(domain_uuid_string)
+
+        return instance_attributes
 
     def get_cpu(self, domain_uuid_string):
         """Get CPU statistics. Libvirt returns the stats in nanoseconds.
@@ -140,7 +149,7 @@ class LibvirtConnection(object):
         info = domain.info()
         timestamp = time.time()
 
-        return {"cpu_time": int(info[4]/info[3]),
+        return {"cpu_time": int(info[4] / info[3]),
                 "core_count": info[3],
                 "timestamp": timestamp}
 
