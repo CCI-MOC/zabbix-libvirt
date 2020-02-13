@@ -96,14 +96,24 @@ def process_host(host, zabbix_sender):
         domains = libvirt_connection.discover_domains()
         for domain in domains:
             try:
-                project = libvirt_connection.get_misc_attributes(domain)[
-                    "project_uuid"]
-                project_group_id = zabbix_api.get_group_id(project)
+                instance_attributes = libvirt_connection.get_misc_attributes(
+                    domain)
+                project_uuid = instance_attributes["project_uuid"]
+                project_name = instance_attributes["project_name"]
 
-                if project_group_id is None:
-                    project_group_id = zabbix_api.create_hostgroup(project)
+                project_uuid_group_id = zabbix_api.get_group_id(project_uuid)
+                project_name_group_id = zabbix_api.get_group_id(project_name)
 
-                groupids = [openstack_group_id, project_group_id]
+                if project_uuid_group_id is None:
+                    project_uuid_group_id = zabbix_api.create_hostgroup(
+                        project_uuid)
+
+                if project_name_group_id is None:
+                    project_name_group_id = zabbix_api.create_hostgroup(
+                        project_name)
+
+                groupids = [openstack_group_id,
+                            project_uuid_group_id, project_name_group_id]
 
                 if zabbix_api.get_host_id(domain) is None:
                     logger.info("Creating new instance: %s", domain)
@@ -112,6 +122,11 @@ def process_host(host, zabbix_sender):
                 elif zabbix_api.get_host_status(domain) == DISABLE_HOST:
                     host_id = zabbix_api.get_host_id(domain)
                     zabbix_api.set_hosts_status([host_id], ENABLE_HOST)
+
+                # Since we decided to update the host groups of all the VMs,
+                # I did this. Leaving it here for now in case we decide to do
+                # it again.
+                # zabbix_api.update_host_groups(domain, groupids)
 
                 metrics = get_instance_metrics(domain, libvirt_connection)
                 zabbix_sender.send(metrics)

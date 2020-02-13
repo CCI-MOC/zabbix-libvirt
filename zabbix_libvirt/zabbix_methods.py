@@ -44,6 +44,13 @@ class ZabbixConnection(object):
             "templates": templates})["result"]
         return results["hostids"][0]
 
+    def update_host_groups(self, host_name, groupids):
+        """Update the host groups of a host"""
+        groups = [{"groupid": i} for i in groupids]
+        hosts = [{"hostid": self.get_host_id(host_name)}]
+        results = self.session.do_request(
+            "hostgroup.massadd", {"groups": groups, "hosts": hosts})
+
     def get_all_hosts(self, groupids=None):
         """
         Find all hosts.
