@@ -125,7 +125,6 @@ def process_host(host, zabbix_sender):
             except ZabbixAPIException as error:
                 logger.error("Zabbix API error")
                 logger.exception(error)
-                raise
     print("Finished Processing: " + host)
     return domains
 
